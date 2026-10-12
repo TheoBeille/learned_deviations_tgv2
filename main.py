@@ -29,8 +29,7 @@ MAYO_CACHE_DIR = f"./data/mayo_cache_{SIZE}"
 MAX_TRAIN_SLICES = None      # evenly spaced over the patients; None = all slices
 MAX_VAL_SLICES = 10
 
-T = 10                      # learned iterations (training: T + randint(0, T)); after
-                            # them the classical scheme restarts from p_T
+T = 10                      # unrolled iterations (training: T + randint(0, T))
 ALPHA = 0.99                # fraction of the safeguard budget (on the norm)
 N_EPOCHS = 50
 LR = 1e-3

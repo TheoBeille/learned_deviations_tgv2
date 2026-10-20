@@ -2,7 +2,6 @@
 Evaluation runs (no gradients). Each returns
 
     kkt       : list of KKT residuals, one per iteration
-    residuals : list of fixed-point residuals ||p_n - y_n||
     x_hist    : list of primal iterates [u, w], one per iteration
 """
 
@@ -11,8 +10,8 @@ import torch
 from algorithm.fbs_step import unroll
 
 
-def _floats(kkt, residuals, x_hist):
-    return [t.item() for t in kkt], [t.item() for t in residuals], x_hist
+def _floats(kkt, x_hist):
+    return [t.item() for t in kkt], x_hist
 
 
 def run_zero(initial_state, functions, params, shapes, T, device):
@@ -42,12 +41,12 @@ def run_learned(model, initial_state, clean, functions, T_test=500, return_all=F
     use_safeguard is given). With return_all, also returns {"x": x_hist}."""
     model.eval()
     with torch.no_grad():
-        kkt, residuals, x_hist = _floats(*model(
+        kkt, x_hist = _floats(*model(
             functions, T=T_test, use_safeguard=use_safeguard,
             keep_history=return_all, progress=True))
     if return_all:
-        return kkt, residuals, {"x": x_hist}
-    return kkt, residuals
+        return kkt, {"x": x_hist}
+    return kkt
 
 
 def run_learned_nosafe(model, initial_state, clean, functions, T_test=500,

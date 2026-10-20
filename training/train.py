@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 def final_loss(model, functions):
     """TGV2 objective F(u_T, w_T) at the output of the last unrolled iteration."""
-    _, _, x_hist = model(functions)
+    _, x_hist = model(functions)
     return functions["objective"](x_hist[-1])
 
 

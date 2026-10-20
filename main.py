@@ -29,7 +29,8 @@ MAYO_CACHE_DIR = f"./data/mayo_cache_{SIZE}"
 MAX_TRAIN_SLICES = None      # evenly spaced over the patients; None = all slices
 MAX_VAL_SLICES = 10
 
-T = 10                      # unrolled iterations (training: T + randint(0, T))
+T = 10                      # learned iterations (training: T + randint(0, T)); after
+                            # them the classical scheme restarts from p_T
 ALPHA = 0.99                # fraction of the safeguard budget (on the norm)
 N_EPOCHS = 50
 LR = 1e-3
@@ -63,7 +64,7 @@ train_data, val_data = build_train_test_data_mayo(
 initial_state, clean, functions = val_data[0]
 
 # --- baseline: zero deviations -----------------------------------------------
-kkt_zero, _, x_hist = run_zero(initial_state, functions, params, SHAPES, T=100, device=device)
+kkt_zero, x_hist = run_zero(initial_state, functions, params, SHAPES, T=100, device=device)
 psnr_zero = psnr_history([x_hist[-1]], clean)[0]
 del x_hist
 print(f"Zero deviation: KKT {kkt_zero[0]:.3e} -> {kkt_zero[-1]:.3e}, PSNR = {psnr_zero:.2f} dB")
@@ -77,7 +78,7 @@ model, train_hist, val_hist = train(
 print(f"Saved {CKPT_PATH}")
 
 # --- learned vs. baseline ----------------------------------------------------
-kkt_learned, _ = run_learned(model, initial_state, clean, functions, T_test=100)
+kkt_learned = run_learned(model, initial_state, clean, functions, T_test=100)
 print(f"Learned:        KKT {kkt_learned[0]:.3e} -> {kkt_learned[-1]:.3e}")
 
 plot_curves({"Zero deviation": kkt_zero, "Learned": kkt_learned}, "KKT residual",

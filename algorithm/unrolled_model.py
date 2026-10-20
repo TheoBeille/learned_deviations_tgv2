@@ -27,7 +27,9 @@ class UnrolledFBS(nn.Module):
 
     def forward(self, functions, T=None, use_safeguard=None, keep_history=False,
                 progress=False):
-        """Returns (kkt, residuals, x_hist), see algorithm.fbs_step.unroll."""
+        """Returns (kkt, x_hist), see algorithm.fbs_step.unroll.
+        Outside training the deviations stop after T iterations and the
+        classical scheme restarts from p_T."""
         if T is None:
             T = self.T
             if self.training and self.random_horizon:
@@ -40,4 +42,4 @@ class UnrolledFBS(nn.Module):
         return unroll(functions, self.params, self.shapes, T, device,
                       direction=self.dev_net, alpha=self.alpha,
                       use_safeguard=use_safeguard, keep_history=keep_history,
-                      progress=progress)
+                      progress=progress, restart=None if self.training else self.T)

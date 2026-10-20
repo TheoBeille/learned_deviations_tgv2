@@ -68,27 +68,33 @@ def random_direction(seed=0):
     return direction
 
 
-def run_fbs(inst, T, direction=None, use_safeguard=True, snapshots=(10,), n_timing=20):
+def run_fbs(inst, T, direction=None, use_safeguard=True, restart=True, snapshots=(10,),
+            n_timing=20):
     """
     Run T iterations of the forward-backward scheme on the test instance.
 
     direction : None (zero deviations), a trained UnrolledFBS model, or a
                 function such as random_direction()
+    restart   : with a trained model, stop the deviations after its T
+                iterations and restart the classical scheme from p_T. False
+                keeps the deviations at every iteration (no-safeguard
+                ablation: shows the divergence).
 
     Returns a dict with, per iteration, "kkt", "objective" and "psnr", the
     reconstructions "images" {iteration: image} at the requested iterations
     and at the last one, and "ms_per_iter" (measured on a separate short run
     without any monitoring).
     """
-    alpha = 0.99
+    alpha, restart_at = 0.99, None
     if isinstance(direction, UnrolledFBS):
+        restart_at = direction.T if restart else None
         direction, alpha = direction.dev_net, direction.alpha
     args = (inst["functions"], inst["params"], inst["shapes"])
     kwargs = dict(device=inst["device"], direction=direction, alpha=alpha,
-                  use_safeguard=use_safeguard)
+                  use_safeguard=use_safeguard, restart=restart_at)
 
     with torch.no_grad():
-        kkt, _, x_hist = unroll(*args, T, keep_history=True, progress=True, **kwargs)
+        kkt, x_hist = unroll(*args, T, keep_history=True, progress=True, **kwargs)
         x0 = [torch.zeros_like(b) for b in x_hist[0]]
         x_hist = [x0] + x_hist
         objective = [inst["functions"]["objective"](x).item() for x in x_hist]
@@ -121,7 +127,7 @@ def reference_solution(inst, T_ref=6000):
         return torch.load(path, map_location=inst["device"])
 
     with torch.no_grad():
-        _, _, x_hist = unroll(inst["functions"], inst["params"], inst["shapes"], T_ref,
+        _, x_hist = unroll(inst["functions"], inst["params"], inst["shapes"], T_ref,
                               inst["device"], progress=True, monitor=False)
         x = x_hist[-1]
         ref = dict(f_star=inst["functions"]["objective"](x).item(),
@@ -136,11 +142,16 @@ def objective_gap(result, f_star, floor=1e-6):
     return np.clip(result["objective"] - f_star, floor, None)
 
 
-def time_table(results, name="time_comparison"):
+def time_table(results,f_star, name="time_comparison"):
     """
     Time comparison between methods.
 
     results : dict {method name: result of run_fbs / run_pdhg}
+    f_star : float
+        The optimal value of the objective function.
+    name : str
+        Name of the output file (without extension).
+
     Columns: time per iteration and PSNR after 10 iterations.
     Returns a pandas DataFrame and writes it as LaTeX to plots/<name>.tex.
     """
@@ -148,7 +159,7 @@ def time_table(results, name="time_comparison"):
 
     rows = [{"Method": method,
              "Time / iteration (ms)": f"{r['ms_per_iter']:.0f}",
-             "PSNR after 10 it. (dB)": f"{r['psnr'][10]:.2f}"}
+             "F-F* after 10 it": f"{results[method]['objective'][10] - f_star:.2f}"}
             for method, r in results.items()]
     table = pd.DataFrame(rows).set_index("Method")
 

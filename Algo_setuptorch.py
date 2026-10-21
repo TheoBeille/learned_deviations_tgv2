@@ -278,7 +278,7 @@ def build_algo_functions(setup, params, step_safety=0.95):
         M = gamma * [[ I/tau , -B^T    ],
                      [ -B    , I/sigma ]],     tau * sigma * ||B||^2 < 1,
 
-    which makes p = (M + gamma A)^{-1}(M z - gamma C y) explicit (one
+    which makes d = (M + gamma A)^{-1}(M z - gamma C y) explicit (one
     PDHG-like step with primal step tau and dual step sigma). gamma cancels
     in this step: it only enters the algorithm through the theta
     coefficients, as the product gamma * beta_bar.
@@ -309,12 +309,12 @@ def build_algo_functions(setup, params, step_safety=0.95):
     def resolvent(z, Cy):
         zu, zw, zp, zq = z
         bt_p, bt_q = BT(zp, zq)
-        pu = zu - tau * (Cy[0] + bt_p)
-        pw = zw - tau * (Cy[1] + bt_q)
-        b_u, b_w = B(2 * pu - zu, 2 * pw - zw)
-        pp = torch.clamp(zp + sigma * b_u, -params.alpha1, params.alpha1)
-        pq = torch.clamp(zq + sigma * b_w, -params.alpha2, params.alpha2)
-        return [pu, pw, pp, pq]
+        du = zu - tau * (Cy[0] + bt_p)
+        dw = zw - tau * (Cy[1] + bt_q)
+        b_u, b_w = B(2 * du - zu, 2 * dw - zw)
+        dp = torch.clamp(zp + sigma * b_u, -params.alpha1, params.alpha1)
+        dq = torch.clamp(zq + sigma * b_w, -params.alpha2, params.alpha2)
+        return [du, dw, dp, dq]
 
     def M_inner(a, b):
         cross = dot(B(a[0], a[1]), b[2:]) + dot(B(b[0], b[1]), a[2:])
@@ -324,22 +324,22 @@ def build_algo_functions(setup, params, step_safety=0.95):
         cross = 2 * dot(B(a[0], a[1]), a[2:])
         return params.gamma0 * (dot(a[:2], a[:2]) / tau + dot(a[2:], a[2:]) / sigma - cross)
 
-    def compute_delta(p, x, p_prev, z, z_prev, y_, y_prev, u, v, n):
+    def compute_delta(d, x, d_prev, z, z_prev, y_, y_prev, u, v, n):
         """Safeguarding budget l_n, eq. (4) of Sadeghi et al."""
         gamma, beta = params.gamma0, params.beta_bar
         mu, a = params.mu(n), params.alpha(n)
         cu = gamma * beta * params.lam(n) ** 2 / params.theta_hat(n)
         cv = 2 * params.theta_bar(n) / params.theta(n)
 
-        core = [p[i] - x[i] + a * (x[i] - p_prev[i]) + cu * u[i] - cv * v[i]
+        core = [d[i] - x[i] + a * (x[i] - d_prev[i]) + cu * u[i] - cv * v[i]
                 for i in range(4)]
-        diff_z = [((z[i] - p[i]) - (z_prev[i] - p_prev[i])) / gamma for i in range(4)]
-        diff_p = [p[i] - p_prev[i] for i in range(4)]
-        diff_py = [(p[i] - y_[i]) - (p_prev[i] - y_prev[i]) for i in range(4)]
+        diff_z = [((z[i] - d[i]) - (z_prev[i] - d_prev[i])) / gamma for i in range(4)]
+        diff_d = [d[i] - d_prev[i] for i in range(4)]
+        diff_dy = [(d[i] - y_[i]) - (d_prev[i] - y_prev[i]) for i in range(4)]
 
         delta = (params.theta(n) / 2 * M_norm_sq(core)
-                 + 2 * mu * gamma * M_inner(diff_z, diff_p)
-                 + mu * gamma * beta / 2 * M_norm_sq(diff_py))
+                 + 2 * mu * gamma * M_inner(diff_z, diff_d)
+                 + mu * gamma * beta / 2 * M_norm_sq(diff_dy))
         return torch.clamp(delta, min=0.0)
 
     def kkt_residual_norm(x):

@@ -30,7 +30,7 @@ MAX_TRAIN_SLICES = None      # evenly spaced over the patients; None = all slice
 MAX_VAL_SLICES = 10
 
 T = 10                      # learned iterations (training: T + randint(0, T)); after
-                            # them the classical scheme restarts from p_T
+                            # them the classical scheme restarts from d_T
 ALPHA = 0.99                # fraction of the safeguard budget (on the norm)
 N_EPOCHS = 50
 LR = 1e-3

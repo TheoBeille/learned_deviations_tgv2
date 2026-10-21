@@ -29,7 +29,7 @@ class UnrolledFBS(nn.Module):
                 progress=False):
         """Returns (kkt, x_hist), see algorithm.fbs_step.unroll.
         Outside training the deviations stop after T iterations and the
-        classical scheme restarts from p_T."""
+        classical scheme restarts from d_T."""
         if T is None:
             T = self.T
             if self.training and self.random_horizon:

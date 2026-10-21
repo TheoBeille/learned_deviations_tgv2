@@ -34,8 +34,8 @@ The dilations (1, 2, 4, 8, 1) give a receptive field of about 35x35 pixels.
 
         self.final = nn.Conv2d(hidden, 2 * n_channels, kernel_size=3, padding=1)
 
-    def forward(self, x, p, y, z, u_prev, v_prev, Cy):
-        primal = [b for blocks in (x, p, y, z, u_prev, v_prev, Cy) for b in blocks[:2]]
+    def forward(self, x, d, y, z, u_prev, v_prev, Cy):
+        primal = [b for blocks in (x, d, y, z, u_prev, v_prev, Cy) for b in blocks[:2]]
 
         h = self.in_norm(torch.cat(primal, dim=1))
         for i in range(self.n_layers):

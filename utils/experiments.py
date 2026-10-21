@@ -76,7 +76,7 @@ def run_fbs(inst, T, direction=None, use_safeguard=True, restart=True, snapshots
     direction : None (zero deviations), a trained UnrolledFBS model, or a
                 function such as random_direction()
     restart   : with a trained model, stop the deviations after its T
-                iterations and restart the classical scheme from p_T. False
+                iterations and restart the classical scheme from d_T. False
                 keeps the deviations at every iteration (no-safeguard
                 ablation: shows the divergence).
 

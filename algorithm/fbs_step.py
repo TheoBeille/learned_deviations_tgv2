@@ -5,9 +5,10 @@ Forward-backward splitting with history and deviations
 Every variable is a list of 4 tensors (u, w, p, q).
 The state carried between iterations is the tuple
 
-    (x, y_prev, p_prev, z_prev, u, v, u_prev, v_prev)
+    (x, y_prev, d_prev, z_prev, u, v, u_prev, v_prev)
 
-where u, v are the deviations of the current iteration.
+where d is the resolvent output (p in the paper, renamed to avoid a clash
+with the dual block p) and u, v are the deviations of the current iteration.
 """
 
 import torch
@@ -21,7 +22,7 @@ def zero_state(shapes, device):
     return tuple(zeros() for _ in range(8))
 
 
-def one_step(x, y_prev, p_prev, z_prev, u, v, n, params, C, RA):
+def one_step(x, y_prev, d_prev, z_prev, u, v, n, params, C, RA):
     """One iteration of the algorithm (steps 5-8)."""
     a = params.alpha(n)      # constant step size, so alpha_bar = alpha
     lam = params.lam(n)
@@ -29,16 +30,16 @@ def one_step(x, y_prev, p_prev, z_prev, u, v, n, params, C, RA):
     blocks = range(len(x))
 
     y = [x[i] + a * (y_prev[i] - x[i]) + u[i] for i in blocks]
-    z = [x[i] + a * (p_prev[i] - x[i]) + a * (z_prev[i] - p_prev[i]) + cu * u[i] + v[i]
+    z = [x[i] + a * (d_prev[i] - x[i]) + a * (z_prev[i] - d_prev[i]) + cu * u[i] + v[i]
          for i in blocks]
 
     Cy = C(y)
-    p = RA(z, Cy)
+    d = RA(z, Cy)
 
-    x_new = [x[i] + lam * (p[i] - z[i]) + a * lam * (z_prev[i] - p_prev[i])
+    x_new = [x[i] + lam * (d[i] - z[i]) + a * lam * (z_prev[i] - d_prev[i])
              for i in blocks]
 
-    return x_new, y, p, z, Cy
+    return x_new, y, d, z, Cy
 
 
 def safeguard(u_raw, v_raw, delta, n, params, M_norm_sq, alpha):
@@ -86,26 +87,26 @@ def fbs_iteration(n, state, functions, params, direction, alpha, use_safeguard):
     One iteration + choice of the next deviations.
 
     direction : None (zero deviations) or a function
-                (x, p, y, z, u_prev, v_prev, Cy) -> (u_raw, v_raw)
+                (x, d, y, z, u_prev, v_prev, Cy) -> (u_raw, v_raw)
     """
-    x, y_prev, p_prev, z_prev, u, v, u_prev, v_prev = state
+    x, y_prev, d_prev, z_prev, u, v, u_prev, v_prev = state
 
-    x_new, y, p, z, Cy = one_step(
-        x, y_prev, p_prev, z_prev, u, v, n, params, functions["C"], functions["RA"])
+    x_new, y, d, z, Cy = one_step(
+        x, y_prev, d_prev, z_prev, u, v, n, params, functions["C"], functions["RA"])
 
     if direction is None:
         u_next, v_next = u, v
     else:
-        u_raw, v_raw = direction(x_new, p, y, z, u_prev, v_prev, Cy)
+        u_raw, v_raw = direction(x_new, d, y, z, u_prev, v_prev, Cy)
         if use_safeguard:
-            delta = functions["compute_delta"](p, x, p_prev, z, z_prev, y, y_prev, u, v, n)
+            delta = functions["compute_delta"](d, x, d_prev, z, z_prev, y, y_prev, u, v, n)
             u_next, v_next = safeguard(u_raw, v_raw, delta, n, params,
                                        functions["M_norm_sq"], alpha)
         else:
             u_next = [alpha * b for b in u_raw]
             v_next = [alpha * b for b in v_raw]
 
-    return (x_new, y, p, z, u_next, v_next, u, v)
+    return (x_new, y, d, z, u_next, v_next, u, v)
 
 
 def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
@@ -115,7 +116,7 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
     Run T iterations from x = 0.
 
     restart : with deviations, number of learned iterations N. After them the
-              deviations stop and the algorithm restarts from x = p_N without
+              deviations stop and the algorithm restarts from x = d_N without
               deviations (a finite number of learned iterations followed by
               the classical scheme, which keeps it convergent).
 
@@ -127,8 +128,8 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
                     keep_history, otherwise only the last one). When gradients
                     are enabled the kept outputs carry a graph (training loss).
 
-    The output is the resolvent output p_n: x_{n+1} = x_n + lam (p_n - z_n) + ...
-    removes the deviation added to z_n again, whereas p_n receives it directly
+    The output is the resolvent output d_n: x_{n+1} = x_n + lam (d_n - z_n) + ...
+    removes the deviation added to z_n again, whereas d_n receives it directly
     (as the proximal output in Banert et al. 2021). Both converge to the same
     solution.
     """
@@ -139,9 +140,9 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
 
     for n in tqdm(range(T), disable=not progress, leave=False):
         if n == restart and direction is not None:
-            p = state[2]
-            zeros = [torch.zeros_like(b) for b in p]
-            state, direction, n0 = (p, p, p, p, zeros, zeros, zeros, zeros), None, n
+            d = state[2]
+            zeros = [torch.zeros_like(b) for b in d]
+            state, direction, n0 = (d, d, d, d, zeros, zeros, zeros, zeros), None, n
         args = (n - n0, state, functions, params, direction, alpha, use_safeguard)
         if with_grad:
             # activations are recomputed during backward instead of stored

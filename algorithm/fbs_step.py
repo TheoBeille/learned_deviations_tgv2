@@ -111,12 +111,14 @@ def fbs_iteration(n, state, functions, params, direction, alpha, use_safeguard):
 
 def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
            use_safeguard=True, keep_history=False, progress=False, monitor=True,
-           restart=None):
+           restart=None, read_out="d"):
     """
     Run T iterations from x = 0.
 
+    read_out : "d" reads the resolvent output d_n, "x" the iterate x_n
+
     restart : with deviations, number of learned iterations N. After them the
-              deviations stop and the algorithm restarts from x = d_N without
+              deviations stop and the algorithm restarts from the read-out (d_N or x_N) without
               deviations (a finite number of learned iterations followed by
               the classical scheme, which keeps it convergent).
 
@@ -128,19 +130,19 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
                     keep_history, otherwise only the last one). When gradients
                     are enabled the kept outputs carry a graph (training loss).
 
-    The output is the resolvent output d_n: x_{n+1} = x_n + lam (d_n - z_n) + ...
-    removes the deviation added to z_n again, whereas d_n receives it directly
-    (as the proximal output in Banert et al. 2021). Both converge to the same
-    solution.
+    With read_out = "d": x_{n+1} = x_n + lam (d_n - z_n) + ... removes the
+    deviation added to z_n again, whereas d_n receives it directly (as the
+    proximal output in Banert et al. 2021). Both converge to the same solution.
     """
     state = zero_state(shapes, device)
     with_grad = torch.is_grad_enabled()
     kkt, x_hist = [], []
     n0 = 0      # iteration counter of the scheme restarts at 0
+    k = 2 if read_out == "d" else 0     # position of the read-out in the state
 
     for n in tqdm(range(T), disable=not progress, leave=False):
         if n == restart and direction is not None:
-            d = state[2]
+            d = state[k]
             zeros = [torch.zeros_like(b) for b in d]
             state, direction, n0 = (d, d, d, d, zeros, zeros, zeros, zeros), None, n
         args = (n - n0, state, functions, params, direction, alpha, use_safeguard)
@@ -150,7 +152,7 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
         else:
             state = fbs_iteration(*args)
 
-        x = state[2]
+        x = state[k]
         if monitor:
             with torch.set_grad_enabled(with_grad and n == T - 1):
                 kkt.append(functions["kkt_residual_norm"](x))

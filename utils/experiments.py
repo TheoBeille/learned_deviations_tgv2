@@ -17,7 +17,9 @@ RESULTS_DIR = "results"
 
 def build_test_instance(size=512, n_angles=180, noise_level=0.05, gamma=2,
                         patient="L014", slice_idx=0,
-                        cache_dir="./data/mayo_cache_512", device=None, **params_kwargs):
+                        cache_dir="./data/mayo_cache_512", device=None,
+                        photons_per_ray=100_000, attenuation_scale=10.0,
+                        **params_kwargs):
     """One test problem: a dict with everything the runs below need.
     Extra keywords (e.g. primal_step) are passed to Params."""
     if device is None:
@@ -25,7 +27,9 @@ def build_test_instance(size=512, n_angles=180, noise_level=0.05, gamma=2,
     params = Params(size=size, gamma0=gamma, **params_kwargs)
     image = MayoSliceDataset([patient], cache_dir)[slice_idx].squeeze(0).numpy()
     setup = get_setup(size, n_angles=n_angles, seed=slice_idx,
-                      noise_level=noise_level, device=device, phantom_array=image)
+                      noise_level=noise_level, device=device, phantom_array=image,
+                      photons_per_ray=photons_per_ray,
+                      attenuation_scale=attenuation_scale)
     return dict(
         setup=setup,
         params=params,
@@ -33,18 +37,23 @@ def build_test_instance(size=512, n_angles=180, noise_level=0.05, gamma=2,
         objective=make_objective(setup, params),
         clean=setup["phantom"],
         back_projection=setup["initial_state"],
+        fbp=setup["fbp"],
         device=device,
         shapes=[(1, 1, size, size), (1, 2, size, size), (1, 2, size, size), (1, 3, size, size)],
         tag=(f"{patient}_slice{slice_idx}_size{size}_angles{n_angles}_noise{noise_level}"
-             f"_alpha{params.alpha1:g}_{params.alpha2:g}_tau{params.primal_step}"),
+             f"_anglemax{setup['geometry'][2]:g}_det{setup['geometry'][3]}"
+             f"_photons{photons_per_ray}_alpha{params.alpha1:g}_{params.alpha2:g}"
+             f"_attenuation{attenuation_scale:g}_tau{params.primal_step}"),
     )
 
 
-def load_model(ckpt_path, inst, T=10, use_safeguard=True):
-    """Trained model and its checkpoint (which holds the loss histories)."""
-    model = UnrolledFBS(inst["params"], inst["shapes"], n_channels=3, T=T,
-                        use_safeguard=use_safeguard).to(inst["device"])
+def load_model(ckpt_path, inst, T=10):
+    """Trained model and its checkpoint (which holds the loss histories).
+    The model keeps the safeguard and read-out options it was trained with."""
     ckpt = torch.load(ckpt_path, map_location=inst["device"])
+    model = UnrolledFBS(inst["params"], inst["shapes"], n_channels=3, T=T,
+                        use_safeguard=ckpt.get("use_safeguard", True),
+                        read_out=ckpt.get("read_out", "d")).to(inst["device"])
     model.load_state_dict(ckpt["model"])
     trained_step = ckpt.get("primal_step", "unknown (older checkpoint)")
     if trained_step != inst["params"].primal_step:
@@ -68,30 +77,33 @@ def random_direction(seed=0):
     return direction
 
 
-def run_fbs(inst, T, direction=None, use_safeguard=True, restart=True, snapshots=(10,),
-            n_timing=20):
+def run_fbs(inst, T, direction=None, restart=True, read_out=None,
+            snapshots=(10,), n_timing=20):
     """
     Run T iterations of the forward-backward scheme on the test instance.
 
     direction : None (zero deviations), a trained UnrolledFBS model, or a
                 function such as random_direction()
     restart   : with a trained model, stop the deviations after its T
-                iterations and restart the classical scheme from d_T. False
-                keeps the deviations at every iteration (no-safeguard
-                ablation: shows the divergence).
+                iterations and restart the classical scheme from the read-out.
+                False keeps the deviations at every iteration.
+    read_out  : "d" (resolvent output d_n) or "x" (iterate x_n); None = as the
+                model was trained ("d" for the other directions)
 
     Returns a dict with, per iteration, "kkt", "objective" and "psnr", the
     reconstructions "images" {iteration: image} at the requested iterations
     and at the last one, and "ms_per_iter" (measured on a separate short run
     without any monitoring).
     """
-    alpha, restart_at = 0.99, None
+    alpha, restart_at, use_safeguard, model_read_out = 0.99, None, True, "d"
     if isinstance(direction, UnrolledFBS):
         restart_at = direction.T if restart else None
+        use_safeguard, model_read_out = direction.use_safeguard, direction.read_out
         direction, alpha = direction.dev_net, direction.alpha
     args = (inst["functions"], inst["params"], inst["shapes"])
     kwargs = dict(device=inst["device"], direction=direction, alpha=alpha,
-                  use_safeguard=use_safeguard, restart=restart_at)
+                  use_safeguard=use_safeguard,
+                  restart=restart_at, read_out=read_out or model_read_out)
 
     with torch.no_grad():
         kkt, x_hist = unroll(*args, T, keep_history=True, progress=True, **kwargs)
@@ -138,7 +150,7 @@ def reference_solution(inst, T_ref=6000):
 
 
 def objective_gap(result, f_star, floor=1e-6):
-    """F(x_n) - F*, clipped from below so that it can be drawn on a log scale."""
+    """F(u_n, w_n) - F*, clipped from below so that it can be drawn on a log scale."""
     return np.clip(result["objective"] - f_star, floor, None)
 
 

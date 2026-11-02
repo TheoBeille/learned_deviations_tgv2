@@ -5,15 +5,16 @@ from tqdm import tqdm
 
 
 def final_loss(model, functions):
-    """TGV2 objective F(u_T, w_T) at the output of the last unrolled iteration."""
+    """log F(u_T, w_T) at the output of the last unrolled iteration (the log
+    keeps slices with a large objective from dominating the gradient)."""
     _, x_hist = model(functions)
-    return functions["objective"](x_hist[-1])
+    return torch.log(functions["objective"](x_hist[-1]))
 
 
 def train(model, train_data, val_data=None, n_epochs=40, lr=1e-3, accum=8, device="cuda",
           grad_clip=1.0, ckpt_path=None):
     """
-    Train the unrolled model on the objective at the last unrolled iteration.
+    Train the unrolled model on log F at the last unrolled iteration.
     The gradients of `accum` slices are averaged before every optimizer step
     (with a single slice per step the weights follow the last slices seen and
     the validation loss swings from one epoch to the next).
@@ -83,7 +84,9 @@ def train(model, train_data, val_data=None, n_epochs=40, lr=1e-3, accum=8, devic
         if ckpt_path is not None:
             torch.save({"model": best_weights, "train_loss_history": train_loss_hist,
                         "val_loss_history": val_loss_hist, "best_loss": best_loss,
-                        "primal_step": model.params.primal_step}, ckpt_path)
+                        "primal_step": model.params.primal_step,
+                        "use_safeguard": model.use_safeguard, "read_out": model.read_out},
+                       ckpt_path)
 
         metrics["best"] = f"{best_loss:.4f}"
         metrics["lr"] = f"{scheduler.get_last_lr()[0]:.1e}"

@@ -7,15 +7,16 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
 
+# matplotlib's default (tab10) colors
 PAPER = {
-    "blue":    "#3B5BA5",
-    "orange":  "#C07820",
-    "green":   "#3C8C5A",
-    "red":     "#B5485D",
-    "purple":  "#6E5BA0",
-    "teal":    "#2E8B8B",
-    "ochre":   "#9C7A2E",
-    "gray":    "#7A7A7A",
+    "blue":    "#1F77B4",
+    "orange":  "#FF7F0E",
+    "green":   "#2CA02C",
+    "red":     "#D62728",
+    "purple":  "#9467BD",
+    "teal":    "#17BECF",
+    "ochre":   "#BCBD22",
+    "gray":    "#7F7F7F",
 }
 
 
@@ -74,13 +75,30 @@ def _save(name):
     plt.close()
 
 
-# one fixed style per method, so that all figures are consistent
+# one fixed style per method, so that all figures are consistent: the color is the
+# method (blue zero, green random, orange learned with safeguard, red learned without),
+# the line style the variant (solid: read d, trained at 512; dotted: read x;
+# dashed: trained at 128)
+_ZERO, _ZERO_X = dict(color=PAPER["blue"], ls="-"), dict(color=PAPER["blue"], ls=":")
+_SAFE, _SAFE_X = dict(color=PAPER["orange"], ls="-"), dict(color=PAPER["orange"], ls=":")
+_NOSAFE = dict(color=PAPER["red"], ls="-")
 STYLES = {
-    "Zero deviation":         dict(color=PAPER["blue"], ls="-"),
-    "Learned":                dict(color=PAPER["orange"], ls="--"),
-    "Random":                 dict(color=PAPER["green"], ls=":"),
-    "Learned (no safeguard)": dict(color=PAPER["red"], ls="--"),
-    "PDHG":                   dict(color=PAPER["purple"], ls="-"),
+    "Zero deviation":                       _ZERO,
+    "Zero deviation, read $d$":             _ZERO,
+    "Zero deviation, read $x$":             _ZERO_X,
+    "Random":                               dict(color=PAPER["green"], ls=":"),
+    "Learned":                              _SAFE,
+    "Learned, read $d$":                    _SAFE,
+    "Learned $d$, safeguard":               _SAFE,
+    "Learned (512 training)":               _SAFE,
+    "Learned, read $x$":                    _SAFE_X,
+    "Learned $x$, safeguard":               _SAFE_X,
+    "Learned (no safeguard)":               _NOSAFE,
+    "Learned $d$, no safeguard":            _NOSAFE,
+    "Learned (512 training, no safeguard)": _NOSAFE,
+    "Learned (128 training)":               dict(color=PAPER["orange"], ls="--"),
+    "Learned (128 training, no safeguard)": dict(color=PAPER["red"], ls="--"),
+    "PDHG":                                 dict(color=PAPER["purple"], ls="-"),
 }
 
 
@@ -89,7 +107,10 @@ def plot_curves(curves, ylabel, name, loglog=True, slopes=False, horizon=None,
     """
     Plot one curve per method against the iteration number.
 
-    curves  : dict {label: values, one per iteration}
+    curves  : dict {label: values, one per iteration}. Values of shape
+              (n_slices, n_iterations) are drawn as their mean over the slices
+              (geometric mean on a log scale); the spread over the slices is
+              reported in the tables, not drawn
     slopes  : add O(1/n) and O(1/n^2) reference lines
     horizon : draw a vertical line at the training horizon
     hline   : (value, label) horizontal reference line
@@ -99,6 +120,11 @@ def plot_curves(curves, ylabel, name, loglog=True, slopes=False, horizon=None,
     """
     plt.figure(figsize=(6, 6))
     plot = plt.loglog if loglog else plt.plot
+    curves = dict(curves)
+    for label, values in list(curves.items()):
+        values = np.asarray(values)
+        if values.ndim == 2:
+            curves[label] = np.exp(np.log(values).mean(0)) if loglog else values.mean(0)
     def visible(values):
         """(iterations, values), without n = 0 on a log scale."""
         values = np.asarray(values)

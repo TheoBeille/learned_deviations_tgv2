@@ -65,7 +65,8 @@ def _operator_norm(op, adj, x, n_iter):
 
 
 def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
-              phantom_array=None, max_angle=2 * np.pi, n_detector=None):
+              phantom_array=None, max_angle=np.pi, n_detector=None,
+              photons_per_ray=100_000, attenuation_scale=10.0):
     """
     Build the operators and the noisy sinogram for one ground-truth image.
 
@@ -73,8 +74,10 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
     seed          : only used for the noise
     max_angle     : the n_angles views are spread over [0, max_angle). With a
                     parallel beam, views that differ by pi measure the same
-                    lines: over 2*pi only half of the views are distinct.
+                    lines, so the default angular range is [0, pi).
     n_detector    : number of detector cells (default: size)
+    photons_per_ray   : incident photons per ray (Poisson noise)
+    attenuation_scale : optical depth of a projection value of 1
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -91,6 +94,7 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
     grad, gradT = _wrap(D), _wrap(D.adjoint)
     sym_grad, sym_gradT = _wrap(E), _wrap(E.adjoint)
     K_raw, KT_raw = _wrap(ray_transform), _wrap(ray_transform.adjoint)
+    fbp = _wrap(odl.tomo.fbp_op(ray_transform))
 
     # fixed starting point of the power iterations, so that two calls of
     # get_setup build exactly the same problem
@@ -119,19 +123,22 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
 
     phantom = torch.tensor(np.asarray(phantom_array), dtype=torch.float32,
                            device=device)[None, None]
-    data = K(phantom)
-    if noise_level > 0:
-        g = torch.Generator().manual_seed(int(seed) + 10_000)
-        noise = torch.randn(data.shape, generator=g).to(device)
-        data = data + noise_level * data.abs().mean() * noise
+    # Poisson noise on the photon counts, then log transform (unweighted
+    # least squares on the log data, as in LoDoPaB-CT)
+    expected_counts = photons_per_ray * torch.exp(-attenuation_scale * K(phantom))
+    g = torch.Generator(device=device).manual_seed(int(seed) + 10_000)
+    counts = torch.poisson(expected_counts, generator=g).clamp(min=1.0)
+    data = -torch.log(counts / photons_per_ray) / attenuation_scale
 
+    fbp_image = norm_K * fbp(data)
     return dict(
         device=device,
         geometry=(size, n_angles, max_angle, n_detector),
         K=K, KT=KT, grad=grad, gradT=gradT, E=sym_grad, ET=sym_gradT,
         norm_K=norm_K, norm_B=norm_B,
-        data=data,                    # noisy sinogram
-        initial_state=KT(data),       # back-projection (for display only)
+        data=data,                    # noisy sinogram (log of Poisson counts)
+        initial_state=KT(data),       # back-projection (power iteration of beta)
+        fbp=fbp_image,                # filtered back-projection (reference image)
         phantom=phantom,              # ground truth
         space=space, ray_transform=ray_transform,   # ODL objects, used by PDHG
     )
@@ -143,8 +150,8 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
 
 class Params:
 
-    def __init__(self, lam0=0.9, beta_bar=None, gamma0=400, alpha1=0.0005,
-                 alpha2=0.001, zeta=0.9, size=128, primal_step=1, lam_exponent=0.3):
+    def __init__(self, lam0=0.9, beta_bar=None, gamma0=400, alpha1=0.00025,
+                 alpha2=0.00025, zeta=0.9, size=128, primal_step=1.75, lam_exponent=0.3):
         self.lam0 = lam0
         self.lam_exponent = lam_exponent    # e in lam_n = lam0 * (1 + n)^e, 0 <= e <= 1
         # Step tau of the primal update in the preconditioned resolvent (the
@@ -288,9 +295,9 @@ def build_algo_functions(setup, params, step_safety=0.95):
     tau, sigma = step_sizes(setup, params, step_safety)
 
     if params.beta_bar is None:
-        # beta_bar = beta (with 5% margin for the error of the power iteration).
+        # beta_bar = beta, the cocoercivity constant (power iteration).
         # A larger beta_bar is allowed but shrinks the safeguard budget.
-        params.beta_bar = 1 * cocoercivity_constant(setup, params.gamma0, tau, sigma)
+        params.beta_bar = cocoercivity_constant(setup, params.gamma0, tau, sigma)
     assert params.gamma0 * params.beta_bar < 4 - 2 * params.lam0
 
     def B(u, w):

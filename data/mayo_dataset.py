@@ -107,7 +107,8 @@ class MayoSliceDataset(Dataset):
 def build_train_test_data_mayo(train_patients, test_patients, params, device,
                                n_angles=180, cache_dir=DEFAULT_CACHE_DIR,
                                noise_level=0.0, max_train_slices=None,
-                               max_test_slices=None):
+                               max_test_slices=None, photons_per_ray=100_000,
+                               attenuation_scale=10.0):
     """
     Returns (train_data, test_data), two lists of tuples
 
@@ -127,7 +128,9 @@ def build_train_test_data_mayo(train_patients, test_patients, params, device,
         for i in indices:
             setup = get_setup(params.size, n_angles=n_angles, seed=int(i),
                               noise_level=noise_level, device=device,
-                              phantom_array=dataset[int(i)].squeeze(0).numpy())
+                              phantom_array=dataset[int(i)].squeeze(0).numpy(),
+                              photons_per_ray=photons_per_ray,
+                              attenuation_scale=attenuation_scale)
             functions = build_algo_functions(setup, params)
             data.append((setup["initial_state"], setup["phantom"], functions))
         return data

@@ -16,11 +16,13 @@ from utils.PSNR import psnr_history
 
 # --- configuration -----------------------------------------------------------
 SIZE = 512                  # 128 or 512
-N_ANGLES = 180
-NOISE_LEVEL = 0.05          # relative noise on the sinogram
+N_ANGLES = 360
+PHOTONS_PER_RAY = 10_000    # incident photons per ray (Poisson noise); must match the notebooks
+ATTENUATION_SCALE = 10.0    # optical-depth scale for normalized phantom values
 GAMMA = 2
-PRIMAL_STEP = 1             # primal step tau (see Params); must match the notebooks
-USE_SAFEGUARD = False        # False: train the network without the safeguard
+PRIMAL_STEP = 1.75          # primal step tau (see Params); must match the notebooks
+USE_SAFEGUARD = True         # False: train the network without the safeguard
+READ_OUT = "d"              # loss on the resolvent output d_T ("d") or on the iterate x_T ("x")
 
 # L014 is kept untouched for the figures (notebooks): it is never used here
 TRAIN_PATIENTS = ["L004", "L006", "L012"]
@@ -29,14 +31,14 @@ MAYO_CACHE_DIR = f"./data/mayo_cache_{SIZE}"
 MAX_TRAIN_SLICES = None      # evenly spaced over the patients; None = all slices
 MAX_VAL_SLICES = 10
 
-T = 10                      # learned iterations (training: T + randint(0, T)); after
-                            # them the classical scheme restarts from d_T
+T = 10                      # learned iterations; after them the classical
+                            # scheme restarts from the read-out
 ALPHA = 0.99                # fraction of the safeguard budget (on the norm)
 N_EPOCHS = 50
 LR = 1e-3
 ACCUM = 8                   # slices per optimizer step (gradient accumulation)
 SEED = 0
-RUN_NAME = f"{SIZE}" + ("" if USE_SAFEGUARD else "_nosafe")
+RUN_NAME = f"{SIZE}" + ("" if USE_SAFEGUARD else "_nosafe") + ("" if READ_OUT == "d" else "_x")
 CKPT_PATH = f"model_{RUN_NAME}.pt"
 
 SHAPES = [
@@ -58,8 +60,10 @@ params = Params(size=SIZE, gamma0=GAMMA, primal_step=PRIMAL_STEP)
 
 train_data, val_data = build_train_test_data_mayo(
     TRAIN_PATIENTS, VAL_PATIENTS, params, device,
-    n_angles=N_ANGLES, cache_dir=MAYO_CACHE_DIR, noise_level=NOISE_LEVEL,
+    n_angles=N_ANGLES, cache_dir=MAYO_CACHE_DIR,
     max_train_slices=MAX_TRAIN_SLICES, max_test_slices=MAX_VAL_SLICES,
+    photons_per_ray=PHOTONS_PER_RAY,
+    attenuation_scale=ATTENUATION_SCALE,
 )
 initial_state, clean, functions = val_data[0]
 
@@ -71,7 +75,7 @@ print(f"Zero deviation: KKT {kkt_zero[0]:.3e} -> {kkt_zero[-1]:.3e}, PSNR = {psn
 
 # --- training ----------------------------------------------------------------
 model = UnrolledFBS(params, SHAPES, n_channels=3, T=T, alpha=ALPHA,
-                    use_safeguard=USE_SAFEGUARD)
+                    use_safeguard=USE_SAFEGUARD, read_out=READ_OUT)
 model, train_hist, val_hist = train(
     model, train_data, val_data=val_data, n_epochs=N_EPOCHS, lr=LR, device=device,
     accum=ACCUM, ckpt_path=CKPT_PATH)   # best epoch, saved after every epoch

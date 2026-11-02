@@ -35,23 +35,14 @@ def run_random(initial_state, functions, params, shapes, T=100, device="cuda",
                                keep_history=True, progress=True))
 
 
-def run_learned(model, initial_state, clean, functions, T_test=500, return_all=False,
-                use_safeguard=None):
-    """Learned deviations (safeguarded or not, as the model was trained, unless
-    use_safeguard is given). With return_all, also returns {"x": x_hist}."""
+def run_learned(model, initial_state, clean, functions, T_test=500, return_all=False):
+    """Learned deviations (safeguarded or not, as the model was trained).
+    With return_all, also returns {"x": x_hist}."""
     model.eval()
     with torch.no_grad():
         kkt, x_hist = _floats(*model(
-            functions, T=T_test, use_safeguard=use_safeguard,
+            functions, T=T_test,
             keep_history=return_all, progress=True))
     if return_all:
         return kkt, {"x": x_hist}
     return kkt
-
-
-def run_learned_nosafe(model, initial_state, clean, functions, T_test=500,
-                       return_all=False):
-    """Learned deviations applied directly, without the safeguard
-    (no convergence guarantee)."""
-    return run_learned(model, initial_state, clean, functions, T_test, return_all,
-                       use_safeguard=False)

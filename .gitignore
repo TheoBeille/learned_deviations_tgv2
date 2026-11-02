@@ -32,3 +32,9 @@ Latex_paper/
 venv/
 .DS_Store
 results/
+
+# Reference papers (local copies)
+*.pdf
+
+# Abandoned FBP warm-start study (kept locally)
+warm_start/

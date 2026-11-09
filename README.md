@@ -41,7 +41,7 @@ conda install -c astra-toolbox astra-toolbox   # GPU ray transform
 python mayo_download.py          # download 5 patients
 python data/mayo_dataset.py      # build the .npy cache
 python main.py                   # training
-# then run the notebooks 1, 2, 3: figures and tables go to plots/
+# then run the notebook paper.ipynb: figures and tables go to plots/
 ```
 
 ## Notes on the method
